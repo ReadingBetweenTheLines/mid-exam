@@ -7,9 +7,11 @@ import { Shield, ArrowRight, AlertCircle, BookOpen } from "lucide-react";
 
 // List of active valid class passcodes
 const VALID_CLASS_CODES: Record<string, string> = {
-  "CS-8A": "Informatics Grade 8 - Class A",
-  "CS-8B": "Informatics Grade 8 - Class B",
-  "CS-8C": "Informatics Grade 8 - Class C",
+  "CS-81": "Informatics Grade 8 - Class VIII-1",
+  "CS-82": "Informatics Grade 8 - Class VIII-2",
+  "CS-83": "Informatics Grade 8 - Class VIII-3",
+  "CS-84": "Informatics Grade 8 - Class VIII-4",
+  "CS-85": "Informatics Grade 8 - Class VIII-5",
   "DEMO": "General Pseudocode Practice",
 };
 
