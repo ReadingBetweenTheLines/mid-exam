@@ -81,7 +81,8 @@ export default function CodeEditor({ value, onChange, readOnly = false }: CodeEd
   };
 
   return (
-    <div className="w-full h-full min-h-[340px]">
+    // Crucial for mobile typing: select-text allows soft keyboard interaction
+    <div className="w-full h-full min-h-[300px] select-text">
       <Editor
         height="100%"
         defaultLanguage="pseudocode"
@@ -91,10 +92,10 @@ export default function CodeEditor({ value, onChange, readOnly = false }: CodeEd
         options={{
           readOnly,
           minimap: { enabled: false },
-          fontSize: 14,
-          fontFamily: "'Fira Code', 'JetBrains Mono', Menlo, monospace",
+          fontSize: 15,
+          fontFamily: "'Fira Code', 'JetBrains Mono', monospace",
           lineNumbers: "on",
-          lineDecorationsWidth: 10,
+          lineDecorationsWidth: 6,
           scrollBeyondLastLine: false,
           automaticLayout: true,
           wordWrap: "on",
@@ -103,6 +104,16 @@ export default function CodeEditor({ value, onChange, readOnly = false }: CodeEd
           renderLineHighlight: "all",
           cursorBlinking: "smooth",
           contextmenu: false,
+          // Mobile Virtual Keyboard & Touch Configuration
+          glyphMargin: false,
+          folding: false,
+          dragAndDrop: false,
+          mouseWheelZoom: false,
+          smoothScrolling: true,
+          accessibilitySupport: "off",
+          domReadOnly: readOnly,
+          // Allows standard phone touch events to focus the hidden input buffer
+          fastScrollSensitivity: 4,
         }}
         onMount={handleEditorDidMount}
       />

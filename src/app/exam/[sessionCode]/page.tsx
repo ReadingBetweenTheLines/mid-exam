@@ -318,7 +318,7 @@ export default function StudentExamPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       {/* 1. Header Bar */}
       <header className="h-14 border-b border-slate-800 bg-slate-900/60 backdrop-blur px-4 md:px-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -455,7 +455,7 @@ export default function StudentExamPage() {
 
         {/* Monaco Code Editor Panel */}
         <section
-          className={`w-full md:w-1/2 flex flex-col bg-[#1e1e1e] ${
+          className={`w-full md:w-1/2 flex flex-col bg-[#1e1e1e] select-text ${
             mobileTab === "code" ? "flex flex-1" : "hidden md:flex"
           }`}
         >
