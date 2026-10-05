@@ -16,7 +16,6 @@ import {
   Wifi,
   WifiOff,
   RefreshCw,
-  FileText,
   Code
 } from "lucide-react";
 
@@ -31,9 +30,6 @@ export default function StudentExamPage() {
   const [lockReason, setLockReason] = useState<string>("");
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const [hasCompleted, setHasCompleted] = useState<boolean>(false);
-
-  // Mobile Viewport Tab State ('problem' | 'code')
-  const [mobileTab, setMobileTab] = useState<"problem" | "code">("problem");
 
   // Dwell tracking
   const [dwellSeconds, setDwellSeconds] = useState<number>(0);
@@ -266,7 +262,9 @@ export default function StudentExamPage() {
               setCode(savedNext !== null ? savedNext : nextQ.starterCode);
               setCurrentIndex(nextIdx);
               setDwellSeconds(0);
-              setMobileTab("problem");
+
+              // Scroll to top on question transition
+              window.scrollTo({ top: 0, behavior: "smooth" });
 
               await supabase
                 .from("exam_sessions")
@@ -318,9 +316,9 @@ export default function StudentExamPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="min-h-screen md:h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       {/* 1. Header Bar */}
-      <header className="h-14 border-b border-slate-800 bg-slate-900/60 backdrop-blur px-4 md:px-6 flex items-center justify-between">
+      <header className="h-14 border-b border-slate-800 bg-slate-900/80 backdrop-blur px-4 md:px-6 flex items-center justify-between shrink-0 sticky top-0 z-20">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 font-mono text-xs md:text-sm font-semibold tracking-wider text-slate-200">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -361,48 +359,18 @@ export default function StudentExamPage() {
         </div>
       </header>
 
-      {/* Mobile Tab Selector */}
-      <div className="md:hidden flex border-b border-slate-800 bg-slate-900/90 text-xs font-mono">
-        <button
-          type="button"
-          onClick={() => setMobileTab("problem")}
-          className={`flex-1 py-2.5 flex items-center justify-center gap-2 font-semibold transition border-b-2 ${
-            mobileTab === "problem"
-              ? "border-blue-500 text-blue-400 bg-blue-950/20"
-              : "border-transparent text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          <FileText className="w-3.5 h-3.5" />
-          <span>1. Soal & Kasus</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setMobileTab("code")}
-          className={`flex-1 py-2.5 flex items-center justify-center gap-2 font-semibold transition border-b-2 ${
-            mobileTab === "code"
-              ? "border-blue-500 text-blue-400 bg-blue-950/20"
-              : "border-transparent text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          <Code className="w-3.5 h-3.5" />
-          <span>2. Editor Pseudocode</span>
-        </button>
-      </div>
-
-      {/* 2. Main Workspace Layout */}
-      <main className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
-        {/* Problem Statement Panel */}
-        <section
-          className={`w-full md:w-1/2 border-b md:border-b-0 md:border-r border-slate-800 flex flex-col bg-slate-900/30 overflow-y-auto ${
-            mobileTab === "problem" ? "flex flex-1" : "hidden md:flex"
-          }`}
-        >
+      {/* 2. Main Workspace Layout: Stacked on Mobile, Side-by-Side on Desktop */}
+      <main className="flex-1 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden relative">
+        {/* Top on Mobile, Left Column on Desktop: Question & Scenario */}
+        <section className="w-full md:w-1/2 flex flex-col border-b md:border-b-0 md:border-r border-slate-800 bg-slate-900/30 md:overflow-y-auto shrink-0">
           <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
             <div>
               <span className="text-[11px] font-mono uppercase tracking-wider text-blue-400 font-semibold">
                 Soal {currentIndex + 1} dari {EXAM_QUESTIONS.length}
               </span>
-              <h1 className="text-lg md:text-xl font-bold text-slate-100 mt-0.5">{currentQuestion.title}</h1>
+              <h1 className="text-base md:text-xl font-bold text-slate-100 mt-0.5">
+                {currentQuestion.title}
+              </h1>
             </div>
             <span
               className={`text-[10px] md:text-xs px-2.5 py-1 rounded font-medium border ${
@@ -417,32 +385,17 @@ export default function StudentExamPage() {
             </span>
           </div>
 
-          <div className="flex-1 p-4 md:p-6 prose prose-invert prose-sm max-w-none">
-            <div className="whitespace-pre-line text-slate-200 leading-relaxed font-sans text-xs md:text-sm bg-slate-950/40 p-4 rounded-xl border border-slate-800/60">
+          <div className="p-4 md:p-6 space-y-4">
+            <div className="whitespace-pre-line text-slate-200 leading-relaxed font-sans text-sm md:text-base bg-slate-950/50 p-4 rounded-xl border border-slate-800 shadow-inner">
               {currentQuestion.description}
             </div>
 
-            <div className="mt-5 p-3.5 md:p-4 rounded-lg bg-slate-950 border border-slate-800/80">
-              <h4 className="text-[11px] md:text-xs uppercase tracking-wider text-slate-400 font-semibold mb-2">
-                Aturan Penulisan Algoritma
-              </h4>
-              <ul className="text-xs space-y-1.5 text-slate-400 list-disc list-inside">
-                <li>Gunakan blok <code className="text-blue-300 font-mono">DEKLARASI</code> untuk mendeklarasikan nama dan tipe data variabel.</li>
-                <li>Tuliskan langkah-langkah logika pemecahan masalah pada bagian <code className="text-blue-300 font-mono">DESKRIPSI</code>.</li>
-                <li>Gunakan instruksi terstruktur seperti <code className="text-blue-300 font-mono">READ</code>, <code className="text-blue-300 font-mono">WRITE</code>, <code className="text-blue-300 font-mono">IF - ELSE</code>, atau <code className="text-blue-300 font-mono">WHILE/FOR</code>.</li>
-              </ul>
+            <div className="p-3.5 rounded-lg bg-slate-950/70 border border-slate-800/80 text-xs text-slate-400">
+              <span className="font-semibold text-slate-300 block mb-1">
+                Instruksi Pengerjaan:
+              </span>
+              Tuliskan kode penyelesaian pseudocode Anda di area editor tepat di bawah soal ini.
             </div>
-          </div>
-
-          {/* Quick Tab Switcher Button on Mobile */}
-          <div className="p-4 md:hidden border-t border-slate-800 bg-slate-900/50">
-            <button
-              type="button"
-              onClick={() => setMobileTab("code")}
-              className="w-full py-2.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 rounded-lg text-xs font-mono font-medium flex items-center justify-center gap-2"
-            >
-              <span>Lanjut ke Editor Pseudocode →</span>
-            </button>
           </div>
 
           {submitMessage && (
@@ -453,13 +406,9 @@ export default function StudentExamPage() {
           )}
         </section>
 
-        {/* Monaco Code Editor Panel */}
-        <section
-          className={`w-full md:w-1/2 flex flex-col bg-[#1e1e1e] select-text ${
-            mobileTab === "code" ? "flex flex-1" : "hidden md:flex"
-          }`}
-        >
-          <div className="h-10 border-b border-slate-800 bg-slate-900 px-4 flex items-center justify-between text-xs text-slate-400">
+        {/* Bottom on Mobile, Right Column on Desktop: Code Editor */}
+        <section className="w-full md:w-1/2 flex flex-col bg-[#1e1e1e] select-text">
+          <div className="h-10 border-b border-slate-800 bg-slate-900 px-4 flex items-center justify-between text-xs text-slate-400 shrink-0">
             <div className="flex items-center gap-2 font-mono text-[11px] md:text-xs">
               <Code className="w-3.5 h-3.5 text-blue-400" />
               <span>algoritma.pseudo</span>
@@ -467,7 +416,7 @@ export default function StudentExamPage() {
             <span className="text-[10px] md:text-[11px] text-slate-500">Draft tersimpan otomatis</span>
           </div>
 
-          <div className="flex-1 relative min-h-[320px]">
+          <div className="min-h-[350px] flex-1 relative">
             <CodeEditor
               value={code}
               onChange={handleCodeChange}
@@ -475,7 +424,8 @@ export default function StudentExamPage() {
             />
           </div>
 
-          <div className="p-3 md:p-4 border-t border-slate-800 bg-slate-900 flex flex-col sm:flex-row items-center justify-between gap-3">
+          {/* Action Footer */}
+          <div className="p-3 md:p-4 border-t border-slate-800 bg-slate-900 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0 sticky bottom-0 z-10">
             <div className="hidden sm:block text-xs text-slate-500">
               Membuka aplikasi lain akan langsung mengunci lembar ujian.
             </div>
