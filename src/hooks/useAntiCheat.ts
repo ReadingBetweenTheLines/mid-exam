@@ -26,7 +26,7 @@ export function useAntiCheat({ sessionId, isLocked, onLock }: AntiCheatOptions) 
   useEffect(() => {
     if (!sessionId) return;
 
-    // Seed timestamp safely inside effect
+    // Seed timestamp safely inside effect to preserve purity
     lastTickRef.current = Date.now();
 
     const logTelemetry = async (
@@ -60,7 +60,7 @@ export function useAntiCheat({ sessionId, isLocked, onLock }: AntiCheatOptions) 
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
 
-    // Hardware Lag & Thread Freeze Monitor
+    // 1. Hardware Lag & Thread Freeze Monitor (every 250ms)
     const lagInterval = setInterval(() => {
       const now = Date.now();
       const delta = now - (lastTickRef.current || now);
@@ -76,7 +76,8 @@ export function useAntiCheat({ sessionId, isLocked, onLock }: AntiCheatOptions) 
       }
     }, 250);
 
-    // Proctor Heartbeat
+    // 2. Randomized Heartbeat Jitter (30s to 40s window for 200+ concurrency)
+    const heartbeatJitterMs = Math.floor(Math.random() * 10000);
     const heartbeatInterval = setInterval(async () => {
       if (!isOnlineRef.current || !sessionId) return;
       try {
@@ -88,11 +89,11 @@ export function useAntiCheat({ sessionId, isLocked, onLock }: AntiCheatOptions) 
           })
           .eq("id", sessionId);
       } catch {
-        // Handled on next interval
+        // Handled on subsequent jittered cycle
       }
-    }, 15000);
+    }, 30000 + heartbeatJitterMs);
 
-    // Mobile Focus & App Switch Monitor
+    // 3. Mobile Focus & App Switch Monitor
     const handleVisibilityChange = async () => {
       const now = Date.now();
 

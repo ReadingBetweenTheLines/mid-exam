@@ -7,11 +7,11 @@ import { EXAM_QUESTIONS } from "@/lib/questions";
 import { ExamSession, Question } from "@/lib/types";
 import { useAntiCheat } from "@/hooks/useAntiCheat";
 import CodeEditor from "@/components/CodeEditor";
-import { 
-  Clock, 
-  Send, 
-  CheckCircle2, 
-  AlertTriangle, 
+import {
+  Clock,
+  Send,
+  CheckCircle2,
+  AlertTriangle,
   Lock,
   Wifi,
   WifiOff,
@@ -35,7 +35,7 @@ export default function StudentExamPage() {
   // Mobile Viewport Tab State ('problem' | 'code')
   const [mobileTab, setMobileTab] = useState<"problem" | "code">("problem");
 
-  // Encounter & Dwell tracking
+  // Dwell tracking
   const [dwellSeconds, setDwellSeconds] = useState<number>(0);
 
   // Submission UI state
@@ -53,89 +53,68 @@ export default function StudentExamPage() {
     return EXAM_QUESTIONS[0]?.starterCode || "";
   });
 
-  // 1. Initial Session Hydration & Real-time Proctor Listeners
+  // 1. Initial Session Hydration (REST only, 0 WebSockets)
   useEffect(() => {
     if (!sessionCode) return;
 
+    let isMounted = true;
+
     const fetchSession = async () => {
-      const { data, error } = await supabase
-        .from("exam_sessions")
-        .select("*")
-        .eq("id", sessionCode)
-        .single();
+      try {
+        const { data, error } = await supabase
+          .from("exam_sessions")
+          .select("*")
+          .eq("id", sessionCode)
+          .single();
 
-      if (error || !data) {
-        setSession({
-          id: sessionCode,
-          class_code: "DEMO-CLASS",
-          student_name: "Student Candidate",
-          student_id: "STU-001",
-          current_question_index: 0,
-          question_encounter_at: new Date().toISOString(),
-          status: "in_progress",
-          is_online: true,
-          last_heartbeat: new Date().toISOString(),
-        });
-        return;
-      }
+        if (!isMounted) return;
 
-      setSession(data);
-      if (data.status === "locked") {
-        setIsLocked(true);
-        setLockReason(data.lock_reason || "Proctor intervention required.");
-      } else if (data.status === "submitted") {
-        setHasCompleted(true);
+        if (error || !data) {
+          setSession({
+            id: sessionCode,
+            class_code: "CS-8A",
+            student_name: "Student Candidate",
+            student_id: "STU-001",
+            current_question_index: 0,
+            question_encounter_at: new Date().toISOString(),
+            status: "in_progress",
+            is_online: true,
+            last_heartbeat: new Date().toISOString(),
+          });
+          return;
+        }
+
+        setSession(data);
+        if (data.status === "locked") {
+          setIsLocked(true);
+          setLockReason(data.lock_reason || "Proctor intervention required.");
+        } else if (data.status === "submitted") {
+          setHasCompleted(true);
+        }
+
+        const targetIdx = data.current_question_index || 0;
+        setCurrentIndex(targetIdx);
+
+        const q = EXAM_QUESTIONS[targetIdx] || EXAM_QUESTIONS[0];
+        const saved = localStorage.getItem(`draft_${sessionCode}_${q.id}`);
+        setCode(saved !== null ? saved : q.starterCode);
+      } catch (err) {
+        console.error("Session load error:", err);
       }
-      
-      const targetIdx = data.current_question_index || 0;
-      setCurrentIndex(targetIdx);
-      
-      const q = EXAM_QUESTIONS[targetIdx] || EXAM_QUESTIONS[0];
-      const saved = localStorage.getItem(`draft_${sessionCode}_${q.id}`);
-      setCode(saved !== null ? saved : q.starterCode);
     };
 
-    fetchSession();
-
-    // Listen for operator unlock / lock commands in real-time
-    const channel = supabase
-      .channel(`session_${sessionCode}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "exam_sessions",
-          filter: `id=eq.${sessionCode}`,
-        },
-        (payload) => {
-          const updated = payload.new as ExamSession;
-          setSession(updated);
-
-          if (updated.status === "in_progress") {
-            setIsLocked(false);
-            setLockReason("");
-          } else if (updated.status === "locked") {
-            setIsLocked(true);
-            setLockReason(updated.lock_reason || "Session locked by proctor.");
-          } else if (updated.status === "submitted") {
-            setHasCompleted(true);
-          }
-        }
-      )
-      .subscribe();
+    void fetchSession();
 
     return () => {
-      supabase.removeChannel(channel);
+      isMounted = false;
     };
   }, [sessionCode]);
 
   // -------------------------------------------------------------
-  // TRIPLE-REDUNDANT UNLOCK FALLBACK (Resilient against dropped WS)
+  // ON-DEMAND REST POLLER (Active ONLY during lockout)
   // -------------------------------------------------------------
   const [isCheckingUnlock, setIsCheckingUnlock] = useState(false);
 
-  // Fallback Polling: checks DB every 3 seconds while locked
   useEffect(() => {
     if (!sessionCode || !isLocked) return;
 
@@ -152,14 +131,14 @@ export default function StudentExamPage() {
           setLockReason("");
         }
       } catch {
-        // Silently ignore if phone is temporarily without connection
+        // Silently retry on next tick
       }
     }, 3000);
 
     return () => clearInterval(pollInterval);
   }, [sessionCode, isLocked]);
 
-  // Student manual sync action button
+  // Manual unlock verification button
   const handleManualUnlockCheck = async () => {
     if (isCheckingUnlock) return;
     setIsCheckingUnlock(true);
@@ -172,7 +151,7 @@ export default function StudentExamPage() {
         .single();
 
       if (error) {
-        alert("Unable to reach exam server. Please check your data/Wi-Fi connection.");
+        alert("Gagal menghubungi server. Periksa koneksi internet Anda.");
         return;
       }
 
@@ -180,17 +159,17 @@ export default function StudentExamPage() {
         setIsLocked(false);
         setLockReason("");
       } else {
-        alert("Your session is still locked by the proctor. Please inform your instructor.");
+        alert("Sesi ujian masih terkunci oleh pengawas. Silakan angkat tangan.");
       }
     } catch {
-      alert("Network error. Please verify your internet connection and try again.");
+      alert("Terjadi kesalahan jaringan.");
     } finally {
       setIsCheckingUnlock(false);
     }
   };
 
   // -------------------------------------------------------------
-  // SILENT HISTORY TRAP LOOP (Blocks Android Back Button & Swipe)
+  // SILENT HISTORY TRAP (Blocks Android Back Button & Swipe)
   // -------------------------------------------------------------
   useEffect(() => {
     window.history.pushState({ examLock: true }, "", window.location.href);
@@ -254,7 +233,7 @@ export default function StudentExamPage() {
     }
   };
 
-  // 5. Submit current question
+  // 5. Submit solution and progress to next question
   const handleSubmitSolution = () => {
     if (isPending) return;
 
@@ -275,21 +254,20 @@ export default function StudentExamPage() {
         const result = await response.json();
 
         if (response.ok) {
-          setSubmitMessage("Answer submitted successfully!");
+          setSubmitMessage("Jawaban pseudocode berhasil disimpan!");
 
           setTimeout(async () => {
             setSubmitMessage(null);
             if (currentIndex + 1 < EXAM_QUESTIONS.length) {
               const nextIdx = currentIndex + 1;
               const nextQ = EXAM_QUESTIONS[nextIdx];
-              
+
               const savedNext = localStorage.getItem(`draft_${sessionCode}_${nextQ.id}`);
               setCode(savedNext !== null ? savedNext : nextQ.starterCode);
               setCurrentIndex(nextIdx);
               setDwellSeconds(0);
-              setMobileTab("problem"); // Reset to problem view on mobile for next question
+              setMobileTab("problem");
 
-              // Update progress in database
               await supabase
                 .from("exam_sessions")
                 .update({
@@ -304,12 +282,12 @@ export default function StudentExamPage() {
                 .update({ status: "submitted" })
                 .eq("id", session?.id || sessionCode);
             }
-          }, 1200);
+          }, 800);
         } else {
-          setSubmitMessage(result.error || "Submission failed. Please try again.");
+          setSubmitMessage(result.error || "Gagal menyimpan jawaban. Coba kembali.");
         }
       } catch {
-        setSubmitMessage("Network transmission error. Answer preserved in buffer.");
+        setSubmitMessage("Gangguan koneksi sementara. Jawaban tetap tersimpan di memori HP.");
       }
     });
   };
@@ -325,14 +303,14 @@ export default function StudentExamPage() {
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-slate-100 font-sans">
         <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-xl p-8 text-center shadow-2xl">
           <CheckCircle2 className="w-16 h-16 text-emerald-400 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold">Exam Completed</h2>
+          <h2 className="text-2xl font-bold">Ujian Pseudocode Selesai</h2>
           <p className="text-slate-400 mt-2 text-sm leading-relaxed">
-            All coding problems have been submitted. Your telemetry and code solutions have been securely stored.
+            Seluruh algoritma pseudocode dan catatan audit keamanan Anda telah tersimpan dengan aman di server.
           </p>
           <div className="mt-6 p-4 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-400">
-            Candidate: <span className="text-slate-200 font-semibold">{session?.student_name}</span>
+            Nama Siswa: <span className="text-slate-200 font-semibold">{session?.student_name}</span>
             <br />
-            Class Code: <span className="text-slate-200 font-semibold">{session?.class_code}</span>
+            Kelas: <span className="text-slate-200 font-semibold">{session?.class_code}</span>
           </div>
         </div>
       </div>
@@ -341,13 +319,13 @@ export default function StudentExamPage() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
-      {/* 1. Responsive Header Bar */}
+      {/* 1. Header Bar */}
       <header className="h-14 border-b border-slate-800 bg-slate-900/60 backdrop-blur px-4 md:px-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 font-mono text-xs md:text-sm font-semibold tracking-wider text-slate-200">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="hidden sm:inline">SECURE EXAM RUNTIME</span>
-            <span className="sm:hidden">EXAM</span>
+            <span className="hidden sm:inline">PSEUDOCODE RUNTIME (KELAS 8)</span>
+            <span className="sm:hidden">PSEUDOCODE</span>
           </div>
           <span className="text-[11px] md:text-xs bg-slate-800 border border-slate-700 px-2 py-0.5 rounded text-slate-300 font-mono">
             {session?.class_code || "CLASS"}
@@ -358,7 +336,7 @@ export default function StudentExamPage() {
           {/* Question Dwell Time */}
           <div className="flex items-center gap-1.5 md:gap-2 bg-slate-800/80 px-2.5 md:px-3 py-1 md:py-1.5 rounded-md border border-slate-700 font-mono text-[11px] md:text-xs">
             <Clock className="w-3.5 h-3.5 text-blue-400" />
-            <span className="hidden sm:inline text-slate-400">Time:</span>
+            <span className="hidden sm:inline text-slate-400">Waktu:</span>
             <span className="text-white font-semibold">{formatTimer(dwellSeconds)}</span>
           </div>
 
@@ -367,23 +345,23 @@ export default function StudentExamPage() {
             {isOnline ? (
               <>
                 <Wifi className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden sm:inline">Online</span>
+                <span className="hidden sm:inline">Terhubung</span>
               </>
             ) : (
               <>
                 <WifiOff className="w-3.5 h-3.5 text-amber-400" />
-                <span className="text-amber-400">Reconnecting...</span>
+                <span className="text-amber-400">Menghubungkan ulang...</span>
               </>
             )}
           </div>
 
           <div className="hidden md:block text-slate-400">
-            Candidate: <span className="text-slate-200 font-medium">{session?.student_name || "Anonymous"}</span>
+            Siswa: <span className="text-slate-200 font-medium">{session?.student_name || "Peserta"}</span>
           </div>
         </div>
       </header>
 
-      {/* Mobile Tab Selector (Visible only on mobile screens < 768px) */}
+      {/* Mobile Tab Selector */}
       <div className="md:hidden flex border-b border-slate-800 bg-slate-900/90 text-xs font-mono">
         <button
           type="button"
@@ -395,7 +373,7 @@ export default function StudentExamPage() {
           }`}
         >
           <FileText className="w-3.5 h-3.5" />
-          <span>1. Problem Details</span>
+          <span>1. Soal & Kasus</span>
         </button>
         <button
           type="button"
@@ -407,7 +385,7 @@ export default function StudentExamPage() {
           }`}
         >
           <Code className="w-3.5 h-3.5" />
-          <span>2. Code Editor</span>
+          <span>2. Editor Pseudocode</span>
         </button>
       </div>
 
@@ -422,7 +400,7 @@ export default function StudentExamPage() {
           <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
             <div>
               <span className="text-[11px] font-mono uppercase tracking-wider text-blue-400 font-semibold">
-                Question {currentIndex + 1} of {EXAM_QUESTIONS.length}
+                Soal {currentIndex + 1} dari {EXAM_QUESTIONS.length}
               </span>
               <h1 className="text-lg md:text-xl font-bold text-slate-100 mt-0.5">{currentQuestion.title}</h1>
             </div>
@@ -430,7 +408,9 @@ export default function StudentExamPage() {
               className={`text-[10px] md:text-xs px-2.5 py-1 rounded font-medium border ${
                 currentQuestion.difficulty === "Easy"
                   ? "bg-emerald-950/40 text-emerald-400 border-emerald-800"
-                  : "bg-amber-950/40 text-amber-400 border-amber-800"
+                  : currentQuestion.difficulty === "Medium"
+                  ? "bg-amber-950/40 text-amber-400 border-amber-800"
+                  : "bg-red-950/40 text-red-400 border-red-800"
               }`}
             >
               {currentQuestion.difficulty}
@@ -438,18 +418,18 @@ export default function StudentExamPage() {
           </div>
 
           <div className="flex-1 p-4 md:p-6 prose prose-invert prose-sm max-w-none">
-            <div className="whitespace-pre-line text-slate-300 leading-relaxed font-sans text-xs md:text-sm">
+            <div className="whitespace-pre-line text-slate-200 leading-relaxed font-sans text-xs md:text-sm bg-slate-950/40 p-4 rounded-xl border border-slate-800/60">
               {currentQuestion.description}
             </div>
 
-            <div className="mt-6 md:mt-8 p-3.5 md:p-4 rounded-lg bg-slate-950 border border-slate-800/80">
+            <div className="mt-5 p-3.5 md:p-4 rounded-lg bg-slate-950 border border-slate-800/80">
               <h4 className="text-[11px] md:text-xs uppercase tracking-wider text-slate-400 font-semibold mb-2">
-                Execution Constraints
+                Aturan Penulisan Algoritma
               </h4>
               <ul className="text-xs space-y-1.5 text-slate-400 list-disc list-inside">
-                <li>Automated tests run on standard JavaScript V8 execution context.</li>
-                <li>Hidden evaluation runs in background upon submission.</li>
-                <li>Do not rename the base <code className="text-blue-300 font-mono">solution</code> function signature.</li>
+                <li>Gunakan blok <code className="text-blue-300 font-mono">DEKLARASI</code> untuk mendeklarasikan nama dan tipe data variabel.</li>
+                <li>Tuliskan langkah-langkah logika pemecahan masalah pada bagian <code className="text-blue-300 font-mono">DESKRIPSI</code>.</li>
+                <li>Gunakan instruksi terstruktur seperti <code className="text-blue-300 font-mono">READ</code>, <code className="text-blue-300 font-mono">WRITE</code>, <code className="text-blue-300 font-mono">IF - ELSE</code>, atau <code className="text-blue-300 font-mono">WHILE/FOR</code>.</li>
               </ul>
             </div>
           </div>
@@ -461,7 +441,7 @@ export default function StudentExamPage() {
               onClick={() => setMobileTab("code")}
               className="w-full py-2.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 rounded-lg text-xs font-mono font-medium flex items-center justify-center gap-2"
             >
-              <span>Continue to Code Editor →</span>
+              <span>Lanjut ke Editor Pseudocode →</span>
             </button>
           </div>
 
@@ -479,9 +459,12 @@ export default function StudentExamPage() {
             mobileTab === "code" ? "flex flex-1" : "hidden md:flex"
           }`}
         >
-          <div className="h-9 md:h-10 border-b border-slate-800 bg-slate-900 px-4 flex items-center justify-between text-xs text-slate-400">
-            <span className="font-mono text-[11px] md:text-xs">solution.js</span>
-            <span className="text-[10px] md:text-[11px] text-slate-500">Draft saved locally</span>
+          <div className="h-10 border-b border-slate-800 bg-slate-900 px-4 flex items-center justify-between text-xs text-slate-400">
+            <div className="flex items-center gap-2 font-mono text-[11px] md:text-xs">
+              <Code className="w-3.5 h-3.5 text-blue-400" />
+              <span>algoritma.pseudo</span>
+            </div>
+            <span className="text-[10px] md:text-[11px] text-slate-500">Draft tersimpan otomatis</span>
           </div>
 
           <div className="flex-1 relative min-h-[320px]">
@@ -494,7 +477,7 @@ export default function StudentExamPage() {
 
           <div className="p-3 md:p-4 border-t border-slate-800 bg-slate-900 flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="hidden sm:block text-xs text-slate-500">
-              Navigation outside this window will trigger an instant security lockdown.
+              Membuka aplikasi lain akan langsung mengunci lembar ujian.
             </div>
             <button
               onClick={handleSubmitSolution}
@@ -503,16 +486,16 @@ export default function StudentExamPage() {
             >
               <Send className="w-3.5 h-3.5" />
               {isPending
-                ? "Evaluating..."
+                ? "Menyimpan..."
                 : currentIndex + 1 === EXAM_QUESTIONS.length
-                ? "Finalize & Submit Exam"
-                : "Submit & Next Question"}
+                ? "Selesai & Kumpulkan Ujian"
+                : "Simpan & Soal Berikutnya"}
             </button>
           </div>
         </section>
       </main>
 
-      {/* 3. Inescapable Proctor Lockout Modal with Triple-Redundant Recovery */}
+      {/* 3. Anti-Cheat Lockout Overlay */}
       {isLocked && (
         <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in duration-200 select-none">
           <div className="max-w-md w-full bg-slate-900 border-2 border-red-600 rounded-2xl p-6 sm:p-8 shadow-2xl text-center space-y-4">
@@ -522,23 +505,22 @@ export default function StudentExamPage() {
 
             <div>
               <h2 className="text-xl font-bold text-white tracking-wide">
-                EXAM SESSION LOCKED
+                SESI UJIAN TERKUNCI
               </h2>
               <p className="text-[11px] font-mono uppercase text-red-400 mt-1">
-                Security Flag Triggered
+                Peringatan Keamanan
               </p>
             </div>
 
             <div className="bg-red-950/30 border border-red-900/60 rounded-lg p-3.5 text-xs text-red-300 leading-relaxed text-left">
-              <strong>Incident Description:</strong>
-              <p className="mt-1">{lockReason || "Focus loss or unauthorized tab movement detected."}</p>
+              <strong>Keterangan Pelanggaran:</strong>
+              <p className="mt-1">{lockReason || "Layar diminimalkan atau berpindah tab/aplikasi."}</p>
             </div>
 
             <p className="text-slate-400 text-xs leading-relaxed">
-              Your test timer is paused. Inform your proctor to authorize your session. This screen will automatically unlock once authorization is issued.
+              Waktu ujian Anda dijeda. Harap angkat tangan dan beri tahu guru pengawas untuk membuka kembali sesi ujian Anda.
             </p>
 
-            {/* Redundancy & Manual Check Controls */}
             <div className="pt-2 space-y-2">
               <button
                 type="button"
@@ -547,11 +529,11 @@ export default function StudentExamPage() {
                 className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 active:scale-95 disabled:opacity-50 border border-slate-700 rounded-lg text-xs font-mono text-slate-200 transition flex items-center justify-center gap-2"
               >
                 <RefreshCw className={`w-3.5 h-3.5 text-blue-400 ${isCheckingUnlock ? "animate-spin" : ""}`} />
-                <span>{isCheckingUnlock ? "Verifying with server..." : "Re-check Unlock Status"}</span>
+                <span>{isCheckingUnlock ? "Memverifikasi..." : "Cek Buka Kunci"}</span>
               </button>
               <div className="text-[11px] font-mono text-slate-500 flex items-center justify-center gap-1.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                <span>Auto-sync polling active (every 3s)</span>
+                <span>Pengecekan otomatis aktif (tiap 3 detik)</span>
               </div>
             </div>
           </div>

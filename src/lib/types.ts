@@ -2,8 +2,9 @@ export interface Question {
   id: string;
   title: string;
   difficulty: "Easy" | "Medium" | "Hard";
+  type?: "essay" | "code";
   description: string;
-  starterCode: string;
+  starterCode: string; // Used as the starter text/template in the editor
   timeLimitMinutes?: number;
   hiddenTests?: {
     input: unknown[];

@@ -12,17 +12,68 @@ import {
   Filter, 
   Search, 
   AlertTriangle, 
-  Download,
-  Activity
+  Download, 
+  Activity, 
+  LogOut, 
+  KeyRound, 
+  FileCode, 
+  Clock 
 } from "lucide-react";
 
+interface SubmissionItem {
+  id?: string;
+  question_id: string;
+  code: string;
+  dwell_time_seconds?: number;
+  created_at?: string;
+}
+
 export default function ProctorDashboard() {
+  // Authentication states
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [passcodeInput, setPasscodeInput] = useState<string>("");
+  const [passcodeError, setPasscodeError] = useState<string | null>(null);
+
+  // Dashboard states
   const [sessions, setSessions] = useState<ExamSession[]>([]);
   const [telemetry, setTelemetry] = useState<TelemetryLog[]>([]);
   const [selectedClass, setSelectedClass] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [activeSessionDetail, setActiveSessionDetail] = useState<ExamSession | null>(null);
+
+  // Submissions inspect modal state
+  const [inspectSubmissions, setInspectSubmissions] = useState<SubmissionItem[]>([]);
+  const [isLoadingSubmissions, setIsLoadingSubmissions] = useState<boolean>(false);
+
+  // Check existing session authorization on mount
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const auth = sessionStorage.getItem("proctor_authorized");
+      if (auth === "true") {
+        setIsAuthenticated(true);
+      }
+    }
+  }, []);
+
+  const handleVerifyPasscode = (e: React.FormEvent) => {
+    e.preventDefault();
+    const INSTRUCTOR_SECRET = "proctor2026";
+
+    if (passcodeInput.trim() === INSTRUCTOR_SECRET) {
+      sessionStorage.setItem("proctor_authorized", "true");
+      setIsAuthenticated(true);
+      setPasscodeError(null);
+    } else {
+      setPasscodeError("Passcode salah. Akses ditolak.");
+    }
+  };
+
+  const handleLogout = () => {
+    sessionStorage.removeItem("proctor_authorized");
+    setIsAuthenticated(false);
+    setPasscodeInput("");
+  };
 
   // Manual sync triggered by button click
   const handleManualSync = async () => {
@@ -49,8 +100,10 @@ export default function ProctorDashboard() {
     }
   };
 
-  // Mount effect: load initial state & wire real-time channels
+  // Mount effect: load initial state & wire real-time channels once authenticated
   useEffect(() => {
+    if (!isAuthenticated) return;
+
     let isMounted = true;
 
     const loadInitialData = async () => {
@@ -109,7 +162,7 @@ export default function ProctorDashboard() {
       supabase.removeChannel(sessionChannel);
       supabase.removeChannel(telemetryChannel);
     };
-  }, []);
+  }, [isAuthenticated]);
 
   const handleUnlock = async (sessionId: string) => {
     try {
@@ -130,7 +183,51 @@ export default function ProctorDashboard() {
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Unknown error";
-      alert(`Failed to unlock session: ${msg}`);
+      alert(`Gagal membuka kunci sesi: ${msg}`);
+    }
+  };
+
+  // Open inspection modal and retrieve submitted answers from both potential tables
+  const handleOpenInspect = async (studentSession: ExamSession) => {
+    setActiveSessionDetail(studentSession);
+    setIsLoadingSubmissions(true);
+    setInspectSubmissions([]);
+
+    try {
+      // 1. Try student_submissions table first
+      const { data: studentData, error: err1 } = await supabase
+        .from("student_submissions")
+        .select("id, question_id, code, dwell_time_seconds, created_at")
+        .eq("session_id", studentSession.id)
+        .order("created_at", { ascending: true });
+
+      if (!err1 && studentData && studentData.length > 0) {
+        setInspectSubmissions(studentData);
+        setIsLoadingSubmissions(false);
+        return;
+      }
+
+      // 2. Fallback to submissions table
+      const { data: legacyData, error: err2 } = await supabase
+        .from("submissions")
+        .select("id, question_id, submitted_code, dwell_time_seconds, created_at")
+        .eq("session_id", studentSession.id)
+        .order("created_at", { ascending: true });
+
+      if (!err2 && legacyData && legacyData.length > 0) {
+        const mapped = legacyData.map((row: any) => ({
+          id: row.id,
+          question_id: row.question_id,
+          code: row.submitted_code || "",
+          dwell_time_seconds: row.dwell_time_seconds,
+          created_at: row.created_at,
+        }));
+        setInspectSubmissions(mapped);
+      }
+    } catch (err) {
+      console.error("Gagal memuat jawaban siswa:", err);
+    } finally {
+      setIsLoadingSubmissions(false);
     }
   };
 
@@ -146,7 +243,7 @@ export default function ProctorDashboard() {
 
   const handleExportCSV = () => {
     if (sessions.length === 0) {
-      alert("No student session records available to export.");
+      alert("Belum ada data ujian siswa untuk diekspor.");
       return;
     }
 
@@ -199,6 +296,59 @@ export default function ProctorDashboard() {
   const activeCount = sessions.filter((s) => s.status === "in_progress").length;
   const submittedCount = sessions.filter((s) => s.status === "submitted").length;
 
+  // PASSCODE CHALLENGE MODAL
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6 font-sans">
+        <div className="max-w-sm w-full bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl space-y-5 text-center">
+          <div className="w-12 h-12 rounded-xl bg-red-950/60 border border-red-800/80 flex items-center justify-center mx-auto text-red-400">
+            <KeyRound className="w-6 h-6" />
+          </div>
+
+          <div>
+            <h2 className="text-lg font-bold text-white tracking-wide">
+              RESTRICTED OPERATOR CONSOLE
+            </h2>
+            <p className="text-xs text-slate-400 mt-1">
+              Hanya untuk pengawas dan guru terotorisasi.
+            </p>
+          </div>
+
+          {passcodeError && (
+            <div className="p-2.5 rounded-lg bg-red-950/40 border border-red-800/60 text-red-300 text-xs flex items-center justify-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+              <span>{passcodeError}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleVerifyPasscode} className="space-y-4 text-left">
+            <div>
+              <label className="block text-[11px] font-mono uppercase text-slate-400 mb-1.5">
+                Passcode Guru Pengawas
+              </label>
+              <input
+                type="password"
+                value={passcodeInput}
+                onChange={(e) => setPasscodeInput(e.target.value)}
+                placeholder="••••••••"
+                required
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-700 focus:outline-none focus:border-red-500 font-mono tracking-widest text-center"
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="w-full py-2.5 bg-red-600 hover:bg-red-500 active:scale-95 text-white font-mono text-xs font-semibold rounded-lg transition shadow-lg shadow-red-950/40"
+            >
+              Verifikasi & Masuk Konsol
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // MAIN OPERATOR DASHBOARD
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
       {/* Header Bar */}
@@ -212,7 +362,7 @@ export default function ProctorDashboard() {
               OPERATOR COMMAND CONSOLE
             </h1>
             <p className="text-[10px] font-mono text-slate-400">
-              REAL-TIME INTEGRITY & HIDDEN GRADING ENGINE
+              REAL-TIME INTEGRITY & PSEUDOCODE AUDIT
             </p>
           </div>
         </div>
@@ -236,39 +386,49 @@ export default function ProctorDashboard() {
             <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin text-blue-400" : ""}`} />
             <span>{isSyncing ? "Syncing..." : "Sync"}</span>
           </button>
+
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-red-950/40 hover:text-red-400 border border-slate-700 text-slate-400 font-mono text-xs flex items-center gap-1.5 transition active:scale-95"
+            title="Kunci Konsol Pengawas"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Kunci</span>
+          </button>
         </div>
       </header>
 
       {/* Top Stats Bar */}
       <div className="bg-slate-900/40 border-b border-slate-800 px-6 py-3.5 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-mono">
         <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 flex items-center justify-between">
-          <span className="text-slate-400">TOTAL CANDIDATES</span>
+          <span className="text-slate-400">TOTAL SISWA</span>
           <span className="text-base font-bold text-white">{sessions.length}</span>
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 flex items-center justify-between">
-          <span className="text-emerald-400">ACTIVE IN-PROGRESS</span>
+          <span className="text-emerald-400">SEDANG MENGERJAKAN</span>
           <span className="text-base font-bold text-emerald-400">{activeCount}</span>
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 flex items-center justify-between">
-          <span className="text-red-400">FLAGGED / LOCKED</span>
+          <span className="text-red-400">TERKUNCI / PELANGGARAN</span>
           <span className="text-base font-bold text-red-400">{lockedCount}</span>
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 flex items-center justify-between">
-          <span className="text-blue-400">COMPLETED</span>
+          <span className="text-blue-400">SELESAI KUMPUL</span>
           <span className="text-base font-bold text-blue-400">{submittedCount}</span>
         </div>
       </div>
 
       {/* Main Dashboard Workspace */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left: Candidates Live Grid */}
+        {/* Candidates Square Grid */}
         <section className="flex-1 flex flex-col border-r border-slate-800 overflow-hidden">
           <div className="p-4 border-b border-slate-800 bg-slate-900/40 flex flex-col sm:flex-row gap-3 items-center justify-between">
             <div className="relative w-full sm:w-64">
               <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search candidate name or ID..."
+                placeholder="Cari nama atau ID siswa..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500"
@@ -282,7 +442,7 @@ export default function ProctorDashboard() {
                 onChange={(e) => setSelectedClass(e.target.value)}
                 className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs font-mono text-slate-300 focus:outline-none focus:border-blue-500"
               >
-                <option value="ALL">ALL CLASSES</option>
+                <option value="ALL">SEMUA KELAS</option>
                 {classList.map((cls) => (
                   <option key={cls} value={cls}>
                     {cls}
@@ -292,11 +452,12 @@ export default function ProctorDashboard() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {/* Cards Grid: Square layout via aspect-square */}
+          <div className="flex-1 overflow-y-auto p-4 md:p-6 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5">
             {filteredSessions.length === 0 ? (
               <div className="col-span-full h-64 flex flex-col items-center justify-center text-slate-500 font-mono text-xs">
                 <Users className="w-8 h-8 mb-2 opacity-40" />
-                <span>No candidate sessions found.</span>
+                <span>Belum ada sesi siswa yang terhubung.</span>
               </div>
             ) : (
               filteredSessions.map((s) => {
@@ -306,27 +467,25 @@ export default function ProctorDashboard() {
                 return (
                   <div
                     key={s.id}
-                    className={`rounded-xl border p-4.5 flex flex-col justify-between transition-all ${
+                    className={`aspect-square rounded-xl border p-3.5 flex flex-col justify-between transition-all select-none ${
                       isStudentLocked
-                        ? "bg-red-950/20 border-red-800/80 shadow-lg shadow-red-950/20"
+                        ? "bg-red-950/20 border-red-800/80 shadow-lg shadow-red-950/30 ring-1 ring-red-500/40"
                         : isSubmitted
                         ? "bg-slate-900/40 border-slate-800/80 opacity-75"
-                        : "bg-slate-900/80 border-slate-800/90 hover:border-slate-700"
+                        : "bg-slate-900/80 border-slate-800 hover:border-slate-700 hover:shadow-md"
                     }`}
                   >
-                    <div>
-                      <div className="flex items-start justify-between gap-2 mb-3">
-                        <div>
-                          <h3 className="font-semibold text-sm text-slate-100 leading-tight">
-                            {s.student_name}
-                          </h3>
-                          <div className="text-[11px] font-mono text-slate-400 mt-0.5">
-                            ID: {s.student_id} · {s.class_code}
-                          </div>
-                        </div>
-
+                    {/* Top Row: Name, Class, Status Badge */}
+                    <div className="space-y-1">
+                      <div className="flex items-start justify-between gap-1">
+                        <h3 
+                          className="font-bold text-xs text-slate-100 truncate flex-1 leading-snug" 
+                          title={s.student_name}
+                        >
+                          {s.student_name}
+                        </h3>
                         <span
-                          className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded border uppercase ${
+                          className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border uppercase shrink-0 ${
                             isStudentLocked
                               ? "bg-red-950 text-red-400 border-red-800 animate-pulse"
                               : isSubmitted
@@ -334,52 +493,52 @@ export default function ProctorDashboard() {
                               : "bg-emerald-950 text-emerald-400 border-emerald-800"
                           }`}
                         >
-                          {s.status}
+                          {s.status === "in_progress" ? "AKTIF" : s.status}
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 text-[11px] font-mono my-3 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/60">
-                        <div>
-                          <span className="text-slate-500 block">CURRENT TASK</span>
-                          <span className="text-slate-200 font-medium">
-                            Problem #{(s.current_question_index ?? 0) + 1}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-slate-500 block">CONFIDENTIAL SCORE</span>
-                          <span className="text-emerald-400 font-bold">
-                            {s.total_score ?? 0} pts
-                          </span>
-                        </div>
+                      <div className="text-[10px] font-mono text-slate-400 truncate">
+                        {s.class_code} · {s.student_id}
+                      </div>
+                    </div>
+
+                    {/* Middle: Compact Progress Indicator & Reason */}
+                    <div className="my-auto py-1 space-y-1.5">
+                      <div className="bg-slate-950/70 p-2 rounded-lg border border-slate-800/80 flex items-center justify-between text-[11px] font-mono">
+                        <span className="text-slate-400 text-[10px]">PROGRES</span>
+                        <span className="font-semibold text-slate-200">
+                          #{(s.current_question_index ?? 0) + 1} / {EXAM_QUESTIONS.length}
+                        </span>
                       </div>
 
                       {isStudentLocked && (
-                        <div className="p-2.5 rounded bg-red-950/40 border border-red-900/60 text-red-300 text-xs mb-3 flex items-start gap-2">
-                          <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
-                          <span className="leading-snug">
-                            {s.lock_reason || "Candidate placed exam in background."}
-                          </span>
+                        <div className="bg-red-950/40 border border-red-900/60 p-1.5 rounded text-[10px] text-red-300 leading-tight truncate flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3 text-red-400 shrink-0" />
+                          <span className="truncate">{s.lock_reason || "Keluar layar"}</span>
                         </div>
                       )}
                     </div>
 
-                    <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                    {/* Bottom: Action Buttons */}
+                    <div className="pt-2 border-t border-slate-800/60 flex items-center gap-1.5">
                       <button
                         type="button"
-                        onClick={() => setActiveSessionDetail(s)}
-                        className="text-xs text-slate-400 hover:text-slate-200 font-mono transition"
+                        onClick={() => handleOpenInspect(s)}
+                        className="flex-1 py-1.5 px-2 bg-slate-800/80 hover:bg-slate-800 text-blue-400 hover:text-blue-300 rounded text-[11px] font-mono font-medium transition text-center truncate flex items-center justify-center gap-1"
+                        title="Lihat Jawaban & Log"
                       >
-                        Inspect Log →
+                        <FileCode className="w-3 h-3 shrink-0" />
+                        <span>Jawaban</span>
                       </button>
 
                       {isStudentLocked && (
                         <button
                           type="button"
                           onClick={() => handleUnlock(s.id)}
-                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-mono text-xs rounded-md flex items-center gap-1.5 transition shadow"
+                          className="py-1.5 px-2.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-mono text-[11px] rounded transition shadow flex items-center justify-center"
+                          title="Buka Kunci Sesi"
                         >
                           <Unlock className="w-3 h-3" />
-                          <span>Unlock</span>
                         </button>
                       )}
                     </div>
@@ -390,22 +549,22 @@ export default function ProctorDashboard() {
           </div>
         </section>
 
-        {/* Right: Live Telemetry & Incident Audit Feed */}
-        <section className="w-80 lg:w-96 flex flex-col bg-slate-900/30 overflow-hidden">
+        {/* Live Audit Stream */}
+        <section className="w-72 lg:w-80 flex flex-col bg-slate-900/30 overflow-hidden">
           <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
             <div className="flex items-center gap-2">
               <Activity className="w-4 h-4 text-blue-400" />
               <h2 className="font-mono text-xs font-bold tracking-wider text-slate-200">
-                LIVE AUDIT STREAM
+                AUDIT TELEMETRI
               </h2>
             </div>
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
           </div>
 
-          <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {telemetry.length === 0 ? (
               <div className="h-40 flex items-center justify-center text-slate-600 font-mono text-xs">
-                Awaiting client telemetry...
+                Menunggu aktivitas klien...
               </div>
             ) : (
               telemetry.map((t) => {
@@ -413,17 +572,17 @@ export default function ProctorDashboard() {
                 return (
                   <div
                     key={t.id}
-                    className={`p-2.5 rounded-lg border text-xs font-mono transition ${
+                    className={`p-2 rounded-lg border text-xs font-mono transition ${
                       isCheat
                         ? "bg-red-950/20 border-red-900/60 text-red-200"
                         : "bg-slate-900/80 border-slate-800 text-slate-300"
                     }`}
                   >
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 mb-1">
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 mb-0.5">
                       <span className="font-bold text-slate-400">{t.event_type}</span>
                       <span>{new Date(t.occurred_at).toLocaleTimeString()}</span>
                     </div>
-                    <p className="text-[11px] leading-relaxed wrap-break-word">{t.details}</p>
+                    <p className="text-[11px] leading-tight break-words">{t.details}</p>
                   </div>
                 );
               })
@@ -432,51 +591,106 @@ export default function ProctorDashboard() {
         </section>
       </div>
 
-      {/* Candidate Inspect Modal */}
+      {/* Inspect Modal with Live Answers */}
       {activeSessionDetail && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="max-w-lg w-full bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="max-w-2xl w-full max-h-[90vh] bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl flex flex-col space-y-4 overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 shrink-0">
               <div>
                 <h3 className="text-base font-bold text-white">
                   {activeSessionDetail.student_name}
                 </h3>
                 <span className="text-xs font-mono text-slate-400">
-                  ID: {activeSessionDetail.student_id} · Class: {activeSessionDetail.class_code}
+                  ID: {activeSessionDetail.student_id} · Kelas: {activeSessionDetail.class_code}
                 </span>
               </div>
               <button
                 type="button"
                 onClick={() => setActiveSessionDetail(null)}
-                className="text-slate-400 hover:text-white font-mono text-xs"
+                className="text-slate-400 hover:text-white font-mono text-xs px-2.5 py-1 rounded bg-slate-800"
               >
-                ✕ Close
+                ✕ Tutup
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 text-xs font-mono">
-              <div className="bg-slate-950 p-3 rounded border border-slate-800">
-                <span className="text-slate-500 block">Session Status</span>
-                <span className="text-white font-bold uppercase">
+            {/* Quick Stats Grid */}
+            <div className="grid grid-cols-2 gap-3 text-xs font-mono shrink-0">
+              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                <span className="text-slate-500 block text-[10px]">STATUS SESI</span>
+                <span className={`font-bold uppercase ${activeSessionDetail.status === "locked" ? "text-red-400" : activeSessionDetail.status === "submitted" ? "text-blue-400" : "text-emerald-400"}`}>
                   {activeSessionDetail.status}
                 </span>
               </div>
-              <div className="bg-slate-950 p-3 rounded border border-slate-800">
-                <span className="text-slate-500 block">Total Score</span>
-                <span className="text-emerald-400 font-bold">
-                  {activeSessionDetail.total_score ?? 0} pts
+              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800">
+                <span className="text-slate-500 block text-[10px]">PROGRES SOAL</span>
+                <span className="text-slate-200 font-bold">
+                  {(activeSessionDetail.current_question_index ?? 0) + 1} dari {EXAM_QUESTIONS.length} Selesai
                 </span>
               </div>
             </div>
 
             {activeSessionDetail.status === "locked" && (
-              <div className="p-3 bg-red-950/40 border border-red-800 rounded text-xs text-red-300">
-                <strong>Incident:</strong>
+              <div className="p-3 bg-red-950/40 border border-red-800 rounded-lg text-xs text-red-300 shrink-0">
+                <strong>Pelanggaran Terdeteksi:</strong>
                 <p className="mt-0.5">{activeSessionDetail.lock_reason}</p>
               </div>
             )}
 
-            <div className="pt-2 flex justify-end gap-2">
+            {/* Answers Section */}
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800/80 text-xs font-mono text-slate-400">
+                <span className="uppercase tracking-wider font-semibold flex items-center gap-1.5 text-slate-300">
+                  <FileCode className="w-3.5 h-3.5 text-blue-400" />
+                  Jawaban Pseudocode Terkumpul:
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  {inspectSubmissions.length} Soal Tersimpan
+                </span>
+              </div>
+
+              <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+                {isLoadingSubmissions ? (
+                  <div className="h-40 flex items-center justify-center text-xs font-mono text-slate-500 gap-2">
+                    <RefreshCw className="w-4 h-4 animate-spin text-blue-400" />
+                    <span>Mengambil jawaban dari database...</span>
+                  </div>
+                ) : inspectSubmissions.length === 0 ? (
+                  <div className="h-40 flex items-center justify-center text-xs font-mono text-slate-500">
+                    Siswa belum menekan tombol submit pada soal manapun.
+                  </div>
+                ) : (
+                  inspectSubmissions.map((sub, idx) => {
+                    const matchedQuestion = EXAM_QUESTIONS.find((q) => q.id === sub.question_id);
+                    return (
+                      <div
+                        key={sub.id || idx}
+                        className="rounded-xl bg-slate-950 border border-slate-800/80 p-3.5 font-mono text-xs space-y-2"
+                      >
+                        <div className="flex items-center justify-between text-[11px] text-slate-400">
+                          <span className="font-semibold text-blue-400">
+                            {matchedQuestion ? matchedQuestion.title : `Soal ID: ${sub.question_id}`}
+                          </span>
+                          {sub.dwell_time_seconds !== undefined && (
+                            <span className="flex items-center gap-1 text-slate-500 text-[10px]">
+                              <Clock className="w-3 h-3" />
+                              {sub.dwell_time_seconds}s pengerjaan
+                            </span>
+                          )}
+                        </div>
+
+                        <pre className="bg-[#18181b] border border-slate-800 p-3 rounded-lg text-slate-200 text-xs whitespace-pre-wrap font-mono leading-relaxed overflow-x-auto selection:bg-blue-600/40">
+                          {sub.code.trim() ? sub.code : "(Jawaban dikirim kosong)"}
+                        </pre>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer Controls */}
+            <div className="pt-3 border-t border-slate-800 flex justify-end gap-2 shrink-0">
               {activeSessionDetail.status === "locked" && (
                 <button
                   type="button"
@@ -484,18 +698,18 @@ export default function ProctorDashboard() {
                     void handleUnlock(activeSessionDetail.id);
                     setActiveSessionDetail(null);
                   }}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs rounded transition flex items-center gap-1.5"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-mono text-xs rounded-lg transition flex items-center gap-1.5 shadow"
                 >
                   <Unlock className="w-3.5 h-3.5" />
-                  <span>Authorize & Unlock</span>
+                  <span>Buka Kunci Sesi</span>
                 </button>
               )}
               <button
                 type="button"
                 onClick={() => setActiveSessionDetail(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs rounded transition"
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs rounded-lg transition"
               >
-                Done
+                Selesai
               </button>
             </div>
           </div>
