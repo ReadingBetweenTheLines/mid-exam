@@ -407,7 +407,7 @@ export default function StudentExamPage() {
         </section>
 
         {/* Bottom on Mobile, Right Column on Desktop: Code Editor */}
-        <section className="w-full md:w-1/2 flex flex-col bg-[#1e1e1e] select-text">
+        <section className="w-full md:w-1/2 flex flex-col bg-[#1e1e1e]">
           <div className="h-10 border-b border-slate-800 bg-slate-900 px-4 flex items-center justify-between text-xs text-slate-400 shrink-0">
             <div className="flex items-center gap-2 font-mono text-[11px] md:text-xs">
               <Code className="w-3.5 h-3.5 text-blue-400" />
@@ -416,7 +416,7 @@ export default function StudentExamPage() {
             <span className="text-[10px] md:text-[11px] text-slate-500">Draft tersimpan otomatis</span>
           </div>
 
-          <div className="min-h-[350px] flex-1 relative">
+          <div className="flex-1 relative">
             <CodeEditor
               value={code}
               onChange={handleCodeChange}
@@ -425,7 +425,7 @@ export default function StudentExamPage() {
           </div>
 
           {/* Action Footer */}
-          <div className="p-3 md:p-4 border-t border-slate-800 bg-slate-900 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0 sticky bottom-0 z-10">
+          <div className="p-3 md:p-4 border-t border-slate-800 bg-slate-900 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
             <div className="hidden sm:block text-xs text-slate-500">
               Membuka aplikasi lain akan langsung mengunci lembar ujian.
             </div>
